@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mongodb:
     image: mongo:8.0
@@ -19,7 +17,7 @@ services:
 
   mongo-express:
     image: mongo-express:latest
-    container_name: mongo-express
+    container_name: mongo_express
     restart: unless-stopped
     ports:
       - "8081:8081"
@@ -34,7 +32,7 @@ services:
       - mongodb-network
 
 volumes:
-  mongodb_data:
+  bugfixers_data:
     driver: local
 
 networks:
