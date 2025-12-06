@@ -182,16 +182,17 @@ db.books.deleteMany({})
 
 ---
 
-## 3. Applied Scenario: E-Commerce Product Catalog
+## 3. Applied Scenario and Complex Queries: Read and Tech Haven
 
 ### Problem Context
 
-An online bookstore needs a flexible database system that can:
-- Handle varying product attributes (books vs. ebooks vs. audiobooks)
-- Store nested review data and ratings
-- Support dynamic inventory tracking
-- Enable fast searches across multiple fields
-- Accommodate frequent schema changes without migrations
+This is an online bookstore that sells(physical books, E-books, audiobooks, electronics and accessories) 
+The importance of using a document managment system for this bookstore is it needs a flexible database system that can:
+  - Handle varying product attributes (books vs. ebooks vs. audiobooks)
+  - Store nested review data and ratings
+  - Support dynamic inventory tracking
+  - Enable fast searches across multiple fields
+  - Accommodate frequent schema changes without migrations
 
 **Why Document Model?**  
 Document databases excel here because each product can have a unique structure stored as a self-contained JSON document, eliminating rigid schemas and JOIN operations.
@@ -199,98 +200,245 @@ Document databases excel here because each product can have a unique structure s
 ### Implementation
 
 #### Step 1: Create Sample Product Catalog
+```bash
+# access container
+docker exec -it bugfixers_cat2 mongosh -u admin -p password123
+
+#use the bookstore database
+use bookstore
+
+# Create products collection
+db.createCollection("products")
+
+# Insert products
+db.products.insertOne({
+  product_id: "BK-001",
+  name: "The Midnight Library",
+  category: "Physical Book",
+  price: 14.99
+})
+
+# or insert using insert-products.js file
+docker exec -i bugfixers_cat2 mongosh -u admin -p password123 < insert-products.js
+
+```
+
+#### Step 2: Complex Queries for Mixed Bookstore
 
 ```javascript
-use ecommerce
+// Query 1: Cross-Category Search
+//Find all products related to "reading" regardless of category
+db.products.find({
+  $or: [
+    { tags: "reading" },
+    { category: { $in: ["Physical Book", "E-Book", "Audiobook"] } },
+    { subcategory: "E-Reader" },
+    { name: /read/i }
+  ]
+}).pretty()
 
-db.products.insertMany([
+//Query 2: Price Analysis by Category
+// Compare pricing across different formats of the same content
+db.products.aggregate([
   {
-    sku: "BOOK-001",
-    type: "physical_book",
-    title: "Clean Code",
-    author: "Robert C. Martin",
-    isbn: "978-0132350884",
-    price: 47.99,
-    currency: "USD",
-    stock: {
-      warehouse_a: 12,
-      warehouse_b: 8
-    },
-    dimensions: {
-      weight_kg: 0.68,
-      pages: 464
-    },
-    categories: ["Software Engineering", "Programming"],
-    ratings: {
-      average: 4.6,
-      total: 1247,
-      distribution: { 5: 856, 4: 298, 3: 67, 2: 18, 1: 8 }
-    },
-    reviews: [
-      {
-        user: "john_dev",
-        rating: 5,
-        comment: "Essential reading for any developer",
-        date: ISODate("2024-10-15")
-      }
-    ]
-  },
-  {
-    sku: "EBOOK-002",
-    type: "ebook",
-    title: "Clean Code",
-    author: "Robert C. Martin",
-    isbn: "978-0132350884",
-    price: 29.99,
-    currency: "USD",
-    format: "PDF",
-    file_size_mb: 12.4,
-    drm_protected: true,
-    categories: ["Software Engineering", "Programming"],
-    ratings: {
-      average: 4.7,
-      total: 834
+    $group: {
+      _id: "$category",
+      avg_price: { $avg: "$price" },
+      min_price: { $min: "$price" },
+      max_price: { $max: "$price" },
+      total_products: { $sum: 1 },
+      total_stock: { $sum: "$stock_quantity" },
+      avg_discount: { $avg: "$discount" }
     }
   },
   {
-    sku: "AUDIO-003",
-    type: "audiobook",
-    title: "The Phoenix Project",
-    author: "Gene Kim",
-    narrator: "Julia Whelan",
-    price: 24.99,
-    currency: "USD",
-    duration_minutes: 942,
-    format: "MP3",
-    categories: ["DevOps", "Business"],
-    ratings: {
-      average: 4.8,
-      total: 2103
+    $sort: { avg_price: -1 }
+  }
+])
+
+//Query 3: Inventory Management for Physical vs Digital books
+// Identify products that need restocking (physical) vs unlimited (digital) copies
+db.products.aggregate([
+  {
+    $addFields: {
+      inventory_status: {
+        $switch: {
+          branches: [
+            {
+              case: { $in: ["$category", ["Physical Book", "Electronics", "Accessories"]] },
+              then: {
+                $cond: {
+                  if: { $lt: ["$stock_quantity", 20] },
+                  then: "LOW_STOCK",
+                  else: "IN_STOCK"
+                }
+              }
+            },
+            {
+              case: { $in: ["$category", ["E-Book", "Audiobook"]] },
+              then: "UNLIMITED"
+            }
+          ],
+          default: "UNKNOWN"
+        }
+      }
+    }
+  },
+  {
+    $match: {
+      inventory_status: "LOW_STOCK"
+    }
+  },
+  {
+    $project: {
+      name: 1,
+      category: 1,
+      stock_quantity: 1,
+      inventory_status: 1,
+      restock_priority: {
+        $cond: {
+          if: { $gt: ["$ratings.average", 4.5] },
+          then: "HIGH",
+          else: "MEDIUM"
+        }
+      }
     }
   }
 ])
-```
 
-#### Step 2: Query by Product Type
-
-```javascript
-// Find all physical books in stock
-db.products.find({
-  type: "physical_book",
-  $expr: {
-    $gt: [
-      { $add: ["$stock.warehouse_a", "$stock.warehouse_b"] },
-      0
-    ]
+//Query 4: Customer Bundle Recommendations
+bookstore> db.products.aggregate([
+  {
+    $match: {
+      product_id: { $ne: "BK-001" }
+    }
+  },
+  {
+    $addFields: {
+      bundle_score: {
+        $add: [
+          { $cond: [{ $eq: ["$category", "Electronics"] }, 30, 0] },
+          { $cond: [{ $eq: ["$subcategory", "E-Reader"] }, 40, 0] },
+          { $cond: [{ $in: ["reading", "$tags"] }, 20, 0] },
+          { $multiply: ["$ratings.average", 10] },
+          { $cond: [{ $gt: ["$discount", 15] }, 15, 0] }
+        ]
+      }
+    }
+  },
+  {
+    $sort: { bundle_score: -1 }
+  },
+  {
+    $limit: 3
+  },
+  {
+    $project: {
+      name: 1,
+      category: 1,
+      price: 1,
+      discount: 1,
+      bundle_score: 1,
+      recommendation: {
+        $switch: {
+          branches: [
+            { 
+              case: { $eq: ["$category", "Electronics"] }, 
+              then: "Perfect device for reading 'The Midnight Library'" 
+            },
+            { 
+              case: { $eq: ["$category", "Accessories"] }, 
+              then: "Enhance your reading of 'The Midnight Library'" 
+            },
+            { 
+              case: { $eq: ["$category", "Audiobook"] }, 
+              then: "Listen to stories like 'The Midnight Library' anywhere" 
+            }
+          ],
+          default: "Complements 'The Midnight Library' perfectly"
+        }
+      },
+      _id: 0
+    }
   }
-})
+]).pretty()
 
-// Find highly-rated ebooks under $35
-db.products.find({
-  type: "ebook",
-  price: { $lt: 35 },
-  "ratings.average": { $gte: 4.5 }
-})
+//Query 5: Format Conversion Analysis
+//FInd books available in diffrent formats
+db.products.aggregate([
+  {
+    $group: {
+      _id: "$name",
+      formats: { $addToSet: "$category" },
+      format_count: { $sum: 1 },
+      prices: { $push: { format: "$category", price: "$price" } },
+      avg_rating: { $avg: "$ratings.average" }
+    }
+  },
+  {
+    $match: {
+      format_count: { $gt: 1 }
+    }
+  },
+  {
+    $project: {
+      title: "$_id",
+      available_formats: "$formats",
+      format_count: 1,
+      price_comparison: "$prices",
+      avg_rating: 1,
+      price_difference: {
+        $subtract: [
+          { $max: "$prices.price" },
+          { $min: "$prices.price" }
+        ]
+      }
+    }
+  },
+  {
+    $sort: { format_count: -1 }
+  }
+])
+
+// Query 6: Author/Publisher Performance
+// Analyze performance by author or publisher across formats
+db.products.aggregate([
+  {
+    $match: {
+      $or: [
+        { category: "Physical Book" },
+        { category: "E-Book" },
+        { category: "Audiobook" }
+      ]
+    }
+  },
+  {
+    $group: {
+      _id: "$author",
+      total_titles: { $sum: 1 },
+      formats: { $addToSet: "$category" },
+      avg_rating: { $avg: "$ratings.average" },
+      total_ratings: { $sum: "$ratings.count" },
+      avg_price: { $avg: "$price" },
+      publishers: { $addToSet: "$publisher" }
+    }
+  },
+  {
+    $addFields: {
+      format_count: { $size: "$formats" },
+      popularity_score: {
+        $multiply: ["$avg_rating", { $divide: ["$total_ratings", 1000] }]
+      }
+    }
+  },
+  {
+    $sort: { popularity_score: -1 }
+  },
+  {
+    $limit: 10
+  }
+])
+
 ```
 
 #### Step 3: Aggregation Pipeline (Analytics)
@@ -465,11 +613,11 @@ sudo systemctl stop mongod
 
 ## Key Takeaways
 
-✅ **Schema Flexibility:** Documents can have varying structures without migrations  
-✅ **Nested Data:** Store related information together (reviews inside products)  
-✅ **Rich Queries:** Support for complex filtering, sorting, and aggregation  
-✅ **Horizontal Scalability:** Easy sharding for growing datasets  
-✅ **Use Cases:** Content management, catalogs, user profiles, IoT data
+**Schema Flexibility:** Documents can have varying structures without migrations  
+**Nested Data:** Store related information together (reviews inside products)  
+**Rich Queries:** Support for complex filtering, sorting, and aggregation  
+**Horizontal Scalability:** Easy sharding for growing datasets  
+**Use Cases:** Content management, catalogs, user profiles, IoT data
 
 ---
 
@@ -482,5 +630,5 @@ sudo systemctl stop mongod
 ---
 
 **Lab Guide Version:** 1.0  
-**Last Updated:** November 2024  
+**Last Updated:** December 2025  
 **Tested On:** MongoDB 8.0.3, Docker 24.0.7
