@@ -439,11 +439,7 @@ db.products.aggregate([
   }
 ])
 
-```
-
-#### Step 3: Aggregation Pipeline (Analytics)
-
-```javascript
+// Query 7 : Aggregation Pipeline (Analytics)
 // Calculate average price by product type
 db.products.aggregate([
   {
@@ -456,62 +452,36 @@ db.products.aggregate([
   { $sort: { avgPrice: -1 } }
 ])
 
-// Find top-rated products
-db.products.aggregate([
-  { $match: { "ratings.total": { $gte: 100 } } },
-  { $sort: { "ratings.average": -1 } },
-  { $limit: 5 },
-  {
-    $project: {
-      title: 1,
-      type: 1,
-      "ratings.average": 1,
-      "ratings.total": 1
-    }
-  }
-])
-```
-
-#### Step 4: Update Inventory
-
-```javascript
-// Process a sale (decrement stock)
-db.products.updateOne(
-  { sku: "BOOK-001" },
-  { $inc: { "stock.warehouse_a": -1 } }
-)
-
-// Add customer review
-db.products.updateOne(
-  { sku: "BOOK-001" },
-  {
-    $push: {
-      reviews: {
-        user: "alice_coder",
-        rating: 5,
-        comment: "Improved my code quality significantly",
-        date: new Date()
-      }
-    },
-    $inc: { "ratings.total": 1 }
-  }
-)
-```
-
-#### Step 5: Text Search Setup
-
-```javascript
+//Query 8 : Text Search Setup
 // Create text index
-db.products.createIndex({
-  title: "text",
-  author: "text",
-  categories: "text"
+ db.products.createIndex({
+  name: "text",
+  author: "text", 
+  tags: "text",
+  "specifications.language": "text",
+  publisher: "text"
+}, {
+  name: "product_search_index",
+  weights: {
+    name: 10,      
+    author: 5,     
+    tags: 3,       
+    publisher: 1   
+  }
 })
-
-// Search products
+//Search product
 db.products.find({
-  $text: { $search: "programming clean code" }
-}).limit(3)
+  $text: { $search: "Hobbit" }
+}).limit(3).pretty()
+// Search for multiple terms
+db.products.find({
+  $text: { $search: "Amazon Kindle" }
+}).limit(3).pretty()
+// Search with relevance score
+db.products.find(
+  { $text: { $search: "book reading" } },
+  { score: { $meta: "textScore" } }
+).sort({ score: { $meta: "textScore" } }).pretty()
 ```
 
 ---
@@ -521,37 +491,107 @@ db.products.find({
 ### Indexing for Performance
 
 ```javascript
-// Single field index
-db.products.createIndex({ sku: 1 })
+// Index on frequently searched fields
+db.products.createIndex({ product_id: 1 })  
+db.products.createIndex({ category: 1 })   
+db.products.createIndex({ "ratings.average": -1 }) 
+db.products.createIndex({ price: 1 })   
 
-// Compound index
-db.products.createIndex({ type: 1, "ratings.average": -1 })
+// For queries filtering by category then sorting by price
+db.products.createIndex({ category: 1, price: 1 })
 
-// View all indexes
+// For queries filtering by category and brand
+db.products.createIndex({ category: 1, brand: 1 })
+
+// For inventory management: category + stock_quantity
+db.products.createIndex({ 
+  category: 1, 
+  stock_quantity: 1 
+})
+
+// For discount-based promotions
+db.products.createIndex({ 
+  discount: -1, 
+  "ratings.average": -1 
+})
+
+// List all indexes on products collection
 db.products.getIndexes()
+
+// Check index usage statistics
+db.products.aggregate([{ $indexStats: {} }])
+
+// Drop an unused index
+db.products.dropIndex("index_name_here")
+
+
 ```
 
 ### Schema Validation
 
 ```javascript
+// Create a validated collection for new products
 db.createCollection("products_validated", {
   validator: {
     $jsonSchema: {
       bsonType: "object",
-      required: ["sku", "title", "price", "type"],
+      required: ["product_id", "name", "category", "price"],
       properties: {
-        sku: {
+        product_id: {
           bsonType: "string",
-          pattern: "^[A-Z]+-[0-9]{3}$"
+          description: "must be a string and is required",
+          pattern: "^[A-Z]+-[0-9]{3}$"  
+        },
+        name: {
+          bsonType: "string",
+          minLength: 3,
+          maxLength: 200
+        },
+        category: {
+          bsonType: "string",
+          enum: ["Physical Book", "E-Book", "Audiobook", "Electronics", "Accessories"]
         },
         price: {
-          bsonType: "double",
+          bsonType: ["double", "int"],
+          minimum: 0,
+          maximum: 10000,
+          description: "price must be positive and under $10,000"
+        },
+        stock_quantity: {
+          bsonType: "int",
           minimum: 0
+        },
+        "ratings.average": {
+          bsonType: "double",
+          minimum: 0,
+          maximum: 5
         }
       }
     }
-  }
+  },
+  validationLevel: "moderate", 
+  validationAction: "warn"  
 })
+
+// Test validation
+db.products_validated.insertOne({
+  product_id: "INVALID",        
+  name: "AB",                   
+  category: "Invalid Category", 
+  price: -10                   
+})
+
+// Check collection statistics
+db.products.stats()
+
+// Check storage usage
+db.products.storageSize()
+
+// Get query performance metrics
+db.setProfilingLevel(1, { slowms: 100 })  // Log queries slower than 100ms
+db.system.profile.find().sort({ ts: -1 }).limit(5)  // View recent slow queries
+
+
 ```
 
 ---
@@ -589,9 +629,12 @@ db.createCollection("products_validated", {
 **Aggregation output:**
 ```json
 [
-  { "_id": "physical_book", "avgPrice": 47.99, "count": 1 },
-  { "_id": "ebook", "avgPrice": 29.99, "count": 1 },
-  { "_id": "audiobook", "avgPrice": 24.99, "count": 1 }
+  { _id: 'Digital', avgPrice: 800.5, count: 1 },
+  { _id: 'Device', avgPrice: 139.99, count: 1 },
+  { _id: null, avgPrice: 98.32333333333334, count: 6 },
+  { _id: 'Digital Audio', avgPrice: 24.99, count: 1 },
+  { _id: 'Accessory', avgPrice: 19.99, count: 1 },
+  { _id: 'Paperback', avgPrice: 14.99, count: 1 }
 ]
 ```
 
