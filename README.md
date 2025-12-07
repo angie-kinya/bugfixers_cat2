@@ -338,5 +338,13 @@ Now that your databases are set up, you'll work through a series of advanced que
 
 NB: See screenshots in the `images` folder to see the expected output. 
 
+## Collaborators
+|**Admission No.** | **Name** | **Task** |
+|:------------:|:-----|:-----|
+| 124461 | Angela Gitonga | Environment Setup |
+| 099913 | Gloria Simiyu | Applied Scenarios and screenshots |
+| 138133 | Neville Masheti | Documentation |
+| 223108 | David Chomba | CRUD Operations |
+| 225518 | Nathan Omeri | Testing and Validation |
 
 
