@@ -37,9 +37,9 @@ docker ps | grep bugfixers_cat2
 # Access MongoDB shell
 docker exec -it bugfixers_cat2 mongosh -u admin -p password123
 ```
-![MongoDB Image](images/Screenshot%20From%202025-11-28%2015-32-03.png)
-![MongoDB Image](images/Screenshot%20From%202025-11-28%2015-33-57.png)
-![MongoDB Image](images/Screenshot%20From%202025-11-28%2015-34-14.png)
+![MongoDB Image](images/set_up_screenshots/environment_setup1.png)
+![MongoDB Image](images/set_up_screenshots/environment_setup2.png)
+![MongoDB Image](images/set_up_screenshots/environment_setup3.png)
 
 **Verification:**
 ```javascript
